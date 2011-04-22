@@ -1,0 +1,8 @@
+Package: package_installer
+Source: git://github.com/josegonzalez/package_installer.git
+Type: plugin
+Section: utility
+Description: installs existing cakephp applications, plugins and utilities
+Pre-depends: CakePHP==1.3
+Homepage: http://github.com/josegonzalez/package_installer
+Bugs: http://github.com/josegonzalez/package_installer/issues
