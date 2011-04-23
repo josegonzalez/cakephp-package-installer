@@ -28,7 +28,7 @@
  * PHP version 5
  *
  * @category Package
- * @package  cakepackages
+ * @package  package_installer
  * @version  0.0.1
  * @author   Jose Diaz-Gonzalez <support@savant.be>
  * @license  http://www.opensource.org/licenses/mit-license.php The MIT License
@@ -37,9 +37,20 @@
 
 class PackageShell extends Shell {
 
-    var $Folder = null;
-
     var $Socket = null;
+
+    var $tasks = array(
+        'PackageRebuild',
+        'PackageSearch',
+        'PackageShow',
+    );
+
+    var $map = array(
+        'app' => 'PackageShow::app',
+        'show' => 'PackageShow::show',
+        'rebuild' => 'PackageRebuild::rebuild',
+        'search' => 'PackageSearch::search',
+    );
 
 /**
  * Main shell logic.
@@ -55,7 +66,13 @@ class PackageShell extends Shell {
             $this->command = 'help';
         }
 
-        $this->{$this->command}();
+        if (isset($this->map[$this->command])) {
+            $cmd = explode('::', $this->map[$this->command]);
+            unset($this->args[0], $this->{$cmd[0]}->args[0]);
+            return $this->{$cmd[0]}->{$cmd[1]}();
+        }
+
+        return $this->{$this->command}();
     }
 
 
@@ -99,188 +116,12 @@ class PackageShell extends Shell {
         $this->out('');
     }
 
-/**
- * Describes the current application in terms of it's control file
- *
- * @return void
- */
-    function app() {
-        $this->args[0] = 'app';
-        $this->show();
-    }
-
-/**
- * Outputs the contents of the control file of either the application (app)
- * or a given plugin
- *
- * @return void
- */
-    function show() {
-        $path = empty($this->args[0]) ? 'app' : $this->args[0];
-        if ($path == 'app') {
-            $path = APP_PATH . 'config' . DS . 'control';
-        }
-
-        if (isset($this->params['path'])) {
-            $path = $this->params['path'];
-        }
-        if (strpos($path, '/') !== 0) {
-            $path =  'plugins' . DS . $path . DS . 'config' . DS . 'control';
-            if (isset($this->params['global'])) {
-                $path = ROOT . DS . $path;
-            } else {
-                $path = APP_PATH . $path;
-            }
-        }
-
-        $control = $this->__loadControl($path);
-        if (!$control) {
-            $this->error(sprintf(__('Missing config at path %s', true), $path));
-        }
-
-        foreach ($control as $key => $value) {
-            $this->out(sprintf('%s: %s', Inflector::humanize($key), $value));
-        }
-        $this->out();
-    }
-
     function installed() {
 
     }
 
     function verify() {
 
-    }
-
-/**
- * Rebuilds a packages.php config file based upon existing plugins
- *
- * @return void
- */
-    function rebuild() {
-        $plugins = array();
-        $this->_folder(APP);
-
-        foreach (App::path('plugins') as $path) {
-            $this->Folder->cd($path);
-            $contents = $this->Folder->read();
-            $folders = $contents[0];
-
-            foreach ($folders as $plugin) {
-                $plugins[$plugin] =  $path . $plugin;
-            }
-        }
-
-        $configs = array();
-        $incompatible = array();
-        foreach ($plugins as $plugin => $path) {
-            $config = $this->__loadControl($path . DS . 'config' . DS . 'control', true);
-            if (!$config) {
-                $incompatible[] = $plugin;
-                continue;
-            }
-
-            $config['install-path'] = $path;
-            $configs[$plugin] = $config;
-        }
-
-        if (!$this->_writeInstalled($configs)) {
-            $this->error('Unable to write packages file');
-        }
-
-        if (!empty($incompatible)) {
-            $this->out('Incompatible packages');
-            $this->hr();
-            foreach ($incompatible as $plugin) {
-                $this->out($plugin);
-            }
-            $this->hr();
-        }
-
-        $this->out('Package file created');
-    }
-
-/**
- * Writes a packages.php file
- *
- * @param array $configs array of config control files
- * @return void
- */
-    function _writeInstalled($configs) {
-        $keys = array(
-            'source', 'maintainer', 'package', 'description', 'type', 'homepage', 'issues',
-            'alias', 'section', 'suggests', 'pre-depends', 'dependencies', 'install-path',
-        );
-        $content = "<?php\n";
-        $content .= "\$installed = array(\n";
-        foreach ($configs as $pluginName => $config) {
-            $content .= "\t'" . $pluginName . "' => array(\n";
-            foreach ($keys as $key) {
-                if (!isset($config[$key])) continue;
-                $content .= "\t\t'" . $key . "' => '" . $config[$key] . "',\n";
-            }
-            $content .= "\t),\n";
-        }
-        $content .= ");\n";
-        $content .= "?>";
-
-        $File = new File(CONFIGS . 'packages.php', true);
-        return $File->write($content);
-    }
-
-/**
- * Searches a cakepackages 1.0-compatible api
- *
- * @return void
- */
-    function search() {
-        if (!isset($this->args[0])) {
-            $query = $this->in(__("Enter a search term or 'q' or nothing to exit", true), null, 'q');
-        } else {
-            $query = $this->args[0];
-        }
-
-        if ($query === 'q') {
-            $this->_stop(1);
-        }
-
-        $this->out(__('Searching all plugins for query...', true));
-        $this->_socket();
-        $plugins = $this->_search($query);
-
-        if (empty($plugins)) {
-            $this->out(__('No results found. Sorry.'));
-        } else {
-            $this->out(sprintf('%d results found.', count($plugins)), 2);
-
-            foreach ($plugins as $key => $result) {
-                $name = str_replace(array('-plugin', '_plugin'), '', $result->name);
-                $this->out(sprintf(__('%d. %s', true), $key + 1, $name));
-                $this->out(sprintf(__('    %s', true), $result->summary), 2);
-            }
-        }
-    }
-
-/**
- * Fires a request to the server for a given query
- *
- * @param string $query 
- * @return mixed array of response objects if successful, false otherwise
- */
-    function _search($query) {
-        $response = false;
-
-        Cache::set(array('duration' => '+7 days'));
-        if (($response = Cache::read('Plugins.server.search.' . $query)) === false) {
-            $response = json_decode($this->Socket->get(sprintf("%s/search/%s", $this->api, $query)));
-            Cache::set(array('duration' => '+7 days'));
-            Cache::write('Plugins.server.search.' . $query, $response);
-        }
-
-        if ($response->status == '200') {
-            return $response->results;
-        }
-        return false;
     }
 
 /**
@@ -370,45 +211,6 @@ class PackageShell extends Shell {
     }
 
 /**
- * Loads a control file into an array from a given path
- *
- * @param string $path full path to control file, including "control"
- * @return mixed False if control file does not exist or array of field names mapping to values
- */
-    function __loadControl($path, $normalize = false) {
-        if (!file_exists($path)) {
-            return false;
-        }
-
-        $last = null;
-        $contents = array();
-        $file = file($path);
-        foreach ($file as $line) {
-            if (strpos($line, '  ') === 0) {
-                if (!$last) continue;
-                $contents[$last] .= ' ' . trim($line);
-            } else {
-                if (strstr($line, ':') === false) {
-                    continue;
-                }
-                list($last, $line) = explode(':', $line, 2);
-                $last = strtolower($last);
-                $contents[$last] = trim($line);
-            }
-        }
-
-        $results = $contents;
-        if ($normalize) {
-            $results = array();
-            foreach ($contents as $field => $value) {
-                $results[Inflector::slug(strtolower($field), '-')] = $value;
-            }
-        }
-
-        return $contents;
-    }
-
-/**
  * Setup the shell's HttpSocket object
  *
  * @return HttpSocket
@@ -419,21 +221,6 @@ class PackageShell extends Shell {
             $this->Socket = new HttpSocket();
         }
         return $this->Socket;
-    }
-
-/**
- * Setup the shell's Folder object
- *
- * @return Folder
- */
-    function _folder($path) {
-        if (!$this->Folder) {
-            App::import('Core', 'Folder');
-            $this->Folder = new Folder($path);
-        }
-
-        $this->Folder->cd($path);
-        return $this->Folder;
     }
 
 }
