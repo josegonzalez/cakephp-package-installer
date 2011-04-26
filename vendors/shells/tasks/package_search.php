@@ -27,7 +27,7 @@ class PackageSearchTask extends Shell {
  */
     function initialize() {
         parent::initialize();
-        $this->api = 'http://packages.dev/1';
+        $this->api = 'http://cakepackages.com/1';
     }
 
 /**
